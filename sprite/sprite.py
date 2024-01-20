@@ -12,29 +12,33 @@ import gc
 
 
 def load_paired_datasets (spatial_counts, spatial_loc, RNAseq_counts, spatial_metadata = None,
-                          min_cell_prevalence_spatial = 0.0, min_cell_prevalence_RNAseq = 0.0,
-                          min_gene_prevalence_spatial = 0.0, min_gene_prevalence_RNAseq = 0.01):
+                          min_cell_prevalence_spatial = 0.0, min_cell_prevalence_RNAseq = 0.01,
+                          min_gene_prevalence_spatial = 0.0, min_gene_prevalence_RNAseq = 0.0):
     '''
     Uses datasets in the format specified by Li et al. (2022)
         See: https://drive.google.com/drive/folders/1pHmE9cg_tMcouV1LFJFtbyBJNp7oQo9J
-        
+    
+    Parameters
+    ----------
         spatial_counts [str] - path to spatial counts file; rows are cells
         spatial_loc [str] - path to spatial locations file; rows are cells
         RNAseq_counts [str] - path to RNAseq counts file; rows are genes
         spatial_metadata [None or str] - if not None, then path to spatial metadata file (will be read into spatial_adata.obs)
         min_cell_prevalence_spatial [float between 0 and 1] - minimum prevalence among cells to include gene in spatial anndata object, default=0
-        min_cell_prevalence_RNAseq [float between 0 and 1] - minimum prevalence among cells to include gene in RNAseq anndata object, default=0
+        min_cell_prevalence_RNAseq [float between 0 and 1] - minimum prevalence among cells to include gene in RNAseq anndata object, default=0.01
         min_gene_prevalence_spatial [float between 0 and 1] - minimum prevalence among genes to include cell in spatial anndata object, default=0
-        min_gene_prevalence_RNAseq [float between 0 and 1] - minimum prevalence among genes to include cell in RNAseq anndata object, default=0.01
+        min_gene_prevalence_RNAseq [float between 0 and 1] - minimum prevalence among genes to include cell in RNAseq anndata object, default=0
     
-    Returns AnnData objects with counts and location (if applicable) in metadata
+    Returns
+    -------
+        spatial_adata, RNAseq_adata - AnnData objects with counts and location (if applicable) in metadata
     '''
     # Spatial data loading
     spatial_adata = load_spatial_data (spatial_counts,
-                                     spatial_loc,
-                                     spatial_metadata = spatial_metadata,
-                                     min_cell_prevalence_spatial = min_cell_prevalence_spatial,
-                                     min_gene_prevalence_spatial = min_gene_prevalence_spatial)
+                                       spatial_loc,
+                                       spatial_metadata = spatial_metadata,
+                                       min_cell_prevalence_spatial = min_cell_prevalence_spatial,
+                                       min_gene_prevalence_spatial = min_gene_prevalence_spatial)
     
     # RNAseq data loading
     RNAseq_adata = load_rnaseq_data (RNAseq_counts,
@@ -46,19 +50,24 @@ def load_paired_datasets (spatial_counts, spatial_loc, RNAseq_counts, spatial_me
 
 def load_spatial_data (spatial_counts, spatial_loc, spatial_metadata=None,
                        min_cell_prevalence_spatial = 0.0, min_gene_prevalence_spatial = 0.0):
-
+    '''
+    Loads in spatial data from text files.
+    
+    See load_paired_datasets() for details on arguments
+    '''
+    # read in spatial counts
     df = pd.read_csv(spatial_counts,header=0,sep="\t")
     
     # filter lowly expressed genes
-    cells_prevalence = np.mean(df>0, axis=0)
+    cells_prevalence = np.mean(df.values>0, axis=0)
     df = df.loc[:,cells_prevalence > min_cell_prevalence_spatial]
-    del cells_prevalence
+    
     # filter sparse cells
-    genes_prevalence = np.mean(df>0, axis=1)
-    df = df.loc[genes_prevalence > min_gene_prevalence_spatial, :]
-    del genes_prevalence
+    genes_prevalence = np.mean(df.values>0, axis=1)
+    df = df.loc[genes_prevalence > min_gene_prevalence_spatial,:]
+    
     # create AnnData
-    spatial_adata = ad.AnnData(X=df)
+    spatial_adata = ad.AnnData(X=df, dtype='float64')
     spatial_adata.obs_names = df.index.values
     spatial_adata.obs_names = spatial_adata.obs_names.astype(str)
     spatial_adata.var_names = df.columns
@@ -66,13 +75,17 @@ def load_spatial_data (spatial_counts, spatial_loc, spatial_metadata=None,
     
     # add spatial locations
     locations = pd.read_csv(spatial_loc,header=0,delim_whitespace=True)
-    spatial_adata.obsm["spatial"] = locations.values
+    spatial_adata.obsm["spatial"] = locations.loc[genes_prevalence > min_gene_prevalence_spatial, :].values
     
     # add metadata
     if spatial_metadata is not None:
         metadata_df = pd.read_csv(spatial_metadata)
+        metadata_df = metadata_df.loc[genes_prevalence > min_gene_prevalence_spatial, :]
         metadata_df.index = spatial_adata.obs_names
         spatial_adata.obs = metadata_df
+    
+    # remove genes with nan values
+    spatial_adata = spatial_adata[:,np.isnan(spatial_adata.X).sum(axis=0)==0].copy()
     
     # make unique obs_names and var_names
     spatial_adata.obs_names_make_unique()
@@ -82,21 +95,32 @@ def load_spatial_data (spatial_counts, spatial_loc, spatial_metadata=None,
 
 
 def load_rnaseq_data (RNAseq_counts, min_cell_prevalence_RNAseq = 0.0, min_gene_prevalence_RNAseq = 0.0):
-
+    '''
+    Loads in scRNAseq data from text files.
+    
+    See load_paired_datasets() for details on arguments
+    '''
+    # read in RNAseq counts
     df = pd.read_csv(RNAseq_counts,header=0,index_col=0,sep="\t")
-    # filter lowly expressed genes
-    cells_prevalence = np.mean(df>0, axis=0)
-    df = df.loc[:,cells_prevalence > min_cell_prevalence_RNAseq]
+    
+    # filter lowly expressed genes -- note that df is transposed gene x cell
+    cells_prevalence = np.mean(df>0, axis=1)
+    df = df.loc[cells_prevalence > min_cell_prevalence_RNAseq,:]
     del cells_prevalence
+    
     # filter sparse cells
-    genes_prevalence = np.mean(df>0, axis=1)
-    df = df.loc[genes_prevalence > min_gene_prevalence_RNAseq, :]
+    genes_prevalence = np.mean(df>0, axis=0)
+    df = df.loc[:,genes_prevalence > min_gene_prevalence_RNAseq]
     del genes_prevalence
+    
     # create AnnData
-    RNAseq_adata = ad.AnnData(X=df.T)
+    RNAseq_adata = ad.AnnData(X=df.T, dtype='float64')
     RNAseq_adata.obs_names = df.T.index.values
     RNAseq_adata.var_names = df.T.columns
     del df
+    
+    # remove genes with nan values
+    RNAseq_adata = RNAseq_adata[:,np.isnan(RNAseq_adata.X).sum(axis=0)==0].copy()
     
     # make unique obs_names and var_names
     RNAseq_adata.obs_names_make_unique()
@@ -112,23 +136,34 @@ def preprocess_data (adata, standardize=False, normalize=False):
         1. sc.pp.normalize_total() if normalize is True
         2. sc.pp.log1p() if normalize is True
         3. Not recommended: standardize each gene (subtract mean, divide by standard deviation)
-        
+    
+    Parameters
+    ----------
         standardize [Boolean] - whether to standardize genes; default is False
         normalize [Boolean] - whether to normalize data; default is False (based on finding by Li et al., 2022)
-        
-    NOTE: Under current default settings, this method does nothing to adata
+    
+    Returns
+    -------
+        Modifies adata in-place
+    
+    NOTE: Under current default settings for TISSUE, this method does nothing to adata
     '''
+    # normalize data
     if normalize is True:
         sc.pp.normalize_total(adata)
         sc.pp.log1p(adata)
     
+    # standardize data
     if standardize is True:
         adata.X = np.divide(adata.X - np.mean(adata.X, axis=0), np.std(adata.X, axis=0))
 
 
-def build_spatial_graph (adata, method="delaunay_radius", spatial="spatial", radius=None, n_neighbors=20, set_diag=True):
+def build_spatial_graph (adata, method="fixed_radius", spatial="spatial", radius=None, n_neighbors=20, set_diag=True):
     '''
-    Builds a spatial graph from AnnData according to specifications:
+    Builds a spatial graph from AnnData according to specifications. Uses Squidpy implementations for building spatial graphs.
+    
+    Parameters
+    ----------
         adata [AnnData] - spatial data, must include adata.obsm[spatial]
         method [str]:
             - "radius" (all cells within radius are neighbors)
@@ -141,44 +176,55 @@ def build_spatial_graph (adata, method="delaunay_radius", spatial="spatial", rad
         n_neighbors [None or int] - number of neighbors to get for each cell (if method is "fixed" or "fixed_radius" or "radius_fixed"); defaults to 20
         set_diag [True or False] - whether to have diagonal of 1 in adjacency (before normalization); False is identical to theory and True is more robust; defaults to True
     
-    Performs all computations inplace. Uses SquidPy implementations for graphs.
+    Returns
+    -------
+        Modifies adata in-place
     '''
     # delaunay graph
     if method == "delaunay": # triangulation only
         sq.gr.spatial_neighbors(adata, delaunay=True, coord_type="generic", set_diag=set_diag)
     
-    # radius-based methods
-    elif method == "radius": # radius only
-        if radius is None: # compute 90th percentile of delaunay triangulation
+    # neighborhoods determined by fixed radius
+    elif method == "radius":
+        if radius is None: # compute 90th percentile of delaunay triangulation as default radius
             sq.gr.spatial_neighbors(adata, delaunay=True, coord_type="generic")
             if isinstance(adata.obsp["spatial_distances"],np.ndarray):
                 dists = adata.obsp['spatial_distances'].flatten()[adata.obsp['spatial_distances'].flatten() > 0]
             else:
                 dists = adata.obsp['spatial_distances'].toarray().flatten()[adata.obsp['spatial_distances'].toarray().flatten() > 0]
             radius = np.percentile(dists, 75) + 1.5*(np.percentile(dists, 75) - np.percentile(dists, 25))
+        # build graph
         sq.gr.spatial_neighbors(adata, radius=radius, coord_type="generic", set_diag=set_diag)
+    
+    # delaunay graph with removal of outlier edges with distance > radius
     elif method == "delaunay_radius":
+        # build initial graph
         sq.gr.spatial_neighbors(adata, delaunay=True, coord_type="generic", set_diag=set_diag)
-        if radius is None:
+        if radius is None: # compute default radius as 75th percentile + 1.5*IQR
             if isinstance(adata.obsp["spatial_distances"],np.ndarray):
                 dists = adata.obsp['spatial_distances'].flatten()[adata.obsp['spatial_distances'].flatten() > 0]
             else:
                 dists = adata.obsp['spatial_distances'].toarray().flatten()[adata.obsp['spatial_distances'].toarray().flatten() > 0]
             radius = np.percentile(dists, 75) + 1.5*(np.percentile(dists, 75) - np.percentile(dists, 25))
+        # prune edges by radius
         adata.obsp['spatial_connectivities'][adata.obsp['spatial_distances']>radius] = 0
         adata.obsp['spatial_distances'][adata.obsp['spatial_distances']>radius] = 0
+    
+    # fixed neighborhood size with removal of outlier edges with distance > radius
     elif method == "fixed_radius":
+        # build initial graph
         sq.gr.spatial_neighbors(adata, n_neighs=n_neighbors, coord_type="generic", set_diag=set_diag)
-        if radius is None:
+        if radius is None: # compute default radius as 75th percentile + 1.5*IQR
             if isinstance(adata.obsp["spatial_distances"],np.ndarray):
                 dists = adata.obsp['spatial_distances'].flatten()[adata.obsp['spatial_distances'].flatten() > 0]
             else:
                 dists = adata.obsp['spatial_distances'].toarray().flatten()[adata.obsp['spatial_distances'].toarray().flatten() > 0]
             radius = np.percentile(dists, 75) + 1.5*(np.percentile(dists, 75) - np.percentile(dists, 25))
+        # prune edges by radius
         adata.obsp['spatial_connectivities'][adata.obsp['spatial_distances']>radius] = 0
         adata.obsp['spatial_distances'][adata.obsp['spatial_distances']>radius] = 0
             
-    # fixed neighborhood size methods
+    # fixed neighborhood size
     elif method == "fixed":
         sq.gr.spatial_neighbors(adata, n_neighs=n_neighbors, coord_type="generic", set_diag=set_diag)
             
@@ -210,6 +256,7 @@ def calc_adjacency_weights (adata, method="cosine", beta=0.0, confidence=None):
     # compute weights
     if method == "binary":
         pass
+    
     elif method == "cluster":
         # cluster AnnData if not already clustered
         if "cluster" not in adata.obs.columns:
@@ -224,6 +271,7 @@ def calc_adjacency_weights (adata, method="cosine", beta=0.0, confidence=None):
         diff_mask = np.abs(same_mask-1)
         # construct cluster-based adjacency matrix
         A = A*same_mask + A*diff_mask*beta
+    
     elif method == "cosine":
         # PCA reduced space
         scaler = StandardScaler()
@@ -237,6 +285,7 @@ def calc_adjacency_weights (adata, method="cosine", beta=0.0, confidence=None):
         # update adjacency matrix
         A = A*cos_sim
         A[A < 0] = 0
+    
     else:
         raise Exception ("weighting must be 'binary', 'cluster', 'cosine'")
     
@@ -281,12 +330,14 @@ def predict_gene_expression (spatial_adata, RNAseq_adata,
                              method="spage", n_folds=None, random_seed=444, **kwargs):
     '''
     Leverages one of several methods to predict spatial gene expression from a paired spatial and scRNAseq dataset
+    
+    Parameters
+    ----------
         spatial_adata [AnnData] = spatial data
         RNAseq_adata [AnnData] = RNAseq data, RNAseq_adata.var_names should be superset of spatial_adata.var_names
         target_genes [list of str] = genes to predict spatial expression for; must be a subset of RNAseq_adata.var_names
         conf_genes [list of str] = genes in spatial_adata.var_names to use for confidence measures; Default is to use all genes in spatial_adata.var_names
         method [str] = baseline imputation method
-            "onn" (uses nearest neighbor in RNAseq data on Harmony joint space)
             "knn" (uses average of k-nearest neighbors in RNAseq data on Harmony joint space)
             "spage" (SpaGE imputation by Abdelaal et al., 2020)
             "tangram" (Tangram cell positioning by Biancalani et al., 2021)
@@ -294,8 +345,10 @@ def predict_gene_expression (spatial_adata, RNAseq_adata,
         n_folds [None or int] = number of cv folds to use for conf_genes, cannot exceed number of conf_genes, None is keeping each gene in its own fold
         random_seed [int] = used to see n_folds choice (defaults to 444)
     
-    Adds to adata the [numpy matrix]: spatial_adata.obsm["predicted_expression"], spatial_adata.obsm["combined_loo_expression"]
-        - matrix of predicted gene expressions (same number of rows as spatial_adata, columns are target_genes)
+    Returns
+    -------
+        Adds to adata the [numpy matrix]: spatial_adata.obsm["predicted_expression"], spatial_adata.obsm["combined_loo_expression"]
+            - matrix of predicted gene expressions (same number of rows as spatial_adata, columns are target_genes)
     '''
     # change all genes to lower
     target_genes = [t.lower() for t in target_genes]
@@ -312,18 +365,18 @@ def predict_gene_expression (spatial_adata, RNAseq_adata,
     if any(x in target_genes for x in spatial_adata.var_names):
         warnings.warn("Some target_genes are already measured in the spatial_adata object!")
     
-    # first pass over all genes
-    if method == "spage":
+    # First pass over all genes using specified method
+    if method == "knn":
+        predicted_expression_target = knn_impute(spatial_adata,RNAseq_adata,genes_to_predict=target_genes,**kwargs)
+    elif method == "spage":
         predicted_expression_target = spage_impute(spatial_adata,RNAseq_adata,genes_to_predict=target_genes,**kwargs)
-    elif method == "gimvi":
-        predicted_expression_target = gimvi_impute(spatial_adata,RNAseq_adata,genes_to_predict=target_genes,**kwargs)
     elif method == "tangram":
         predicted_expression_target = tangram_impute(spatial_adata,RNAseq_adata,genes_to_predict=target_genes,**kwargs)
     else:
         raise Exception ("method not recognized")
         
-    # second pass over conf_genes
-        # predictions done with a leave-gene-out approach
+    # Second pass over conf_genes using specified method using cross-validation
+    
     if conf_genes is None:
         conf_genes = list(spatial_adata.var_names)
     conf_genes = [c.lower() for c in conf_genes]
@@ -350,8 +403,8 @@ def predict_gene_expression (spatial_adata, RNAseq_adata,
     np.random.shuffle(conf_genes)
     folds = np.array_split(conf_genes, n_folds)
     
+    # run prediction on each fold
     for gi, fold in enumerate(folds):
-        
         if method == "knn":
             loo_expression = knn_impute(spatial_adata[:,~spatial_adata.var_names.isin(fold)],RNAseq_adata,genes_to_predict=list(fold)+target_genes,**kwargs)
         elif method == "spage":
@@ -377,6 +430,7 @@ def predict_gene_expression (spatial_adata, RNAseq_adata,
     # Update spatial_adata
     predicted_expression_target.index = spatial_adata.obs_names
     predicted_expression_conf.index = spatial_adata.obs_names
+
     # gets predictions for target genes followed by conf genes
     predicted_expression_target[conf_genes] = predicted_expression_conf[conf_genes].copy()
     spatial_adata.obsm[method+"_predicted_expression"] = predicted_expression_target
