@@ -25,7 +25,7 @@ pip install -r requirements.txt
 
 To keep the requirements light, we have only included packages that are necessary for the core functionalities of SPRITE. For additional utilities such as gene prediction with Tangram, please install those packages separately (or uncomment those lines in `requirements.txt`).
 
-To test that the installation is working correctly, you can run `python test.py` in the cloned directory or run through the Quick Start guide examples.
+To test the installation, you run through the Quick Start guide examples below.
 
 
 ## Quick Start
@@ -127,7 +127,7 @@ sprite.reinforce_gene(adata, predicted="spage_predicted_expression",
                       alpha=0.1, tol=1e-8, cv=5)
 ```
 
-    Using automatic Spearman gene correlation threshold: 0.255
+    Using automatic Spearman gene correlation threshold: 0.254
     Propagation converged after 13 iterations
 
 
@@ -147,7 +147,7 @@ sprite.smooth(adata, predicted="reinforced_gene_joint_spage_predicted_expression
               alpha=0.1, tol=1e-8)
 ```
 
-    Propagation converged after 12 iterations
+    Propagation converged after 11 iterations
 
 
 In cases where you want to run Smooth without Reinforce, just set `predicted='spage_predicted_expression'`.
