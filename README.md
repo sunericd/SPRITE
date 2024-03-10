@@ -10,7 +10,7 @@
 To install SPRITE locally, first clone the repository using git (you can install git following the instructions [here](https://github.com/git-guides/install-git)):
 
 ```
-git clone https://github.com/sunericd/TISSUE.git
+git clone https://github.com/sunericd/SPRITE.git
 ```
 
 We recommend setting up a conda environment to install the requirements for the package (instructions for installing conda and what conda environment can do can be found [here](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html)). Installation of requirements can then be done with the following commands:
@@ -147,7 +147,7 @@ sprite.smooth(adata, predicted="reinforced_gene_joint_spage_predicted_expression
               alpha=0.1, tol=1e-8)
 ```
 
-    Propagation converged after 11 iterations
+    Propagation converged after 12 iterations
 
 
 In cases where you want to run Smooth without Reinforce, just set `predicted='spage_predicted_expression'`.
